@@ -16,7 +16,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Format check
-        run: test -z "$(gofmt -l ./...)"
+        run: test -z "$(gofmt -l $(go list -f '{{.Dir}}' ./...))"
 
       - name: Lint
         uses: golangci/golangci-lint-action@v6

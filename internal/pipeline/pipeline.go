@@ -20,7 +20,7 @@ type Pipeline struct {
 // Apply runs the line through all stages. ok is false if any stage
 // dropped the line.
 func (p *Pipeline) Apply(line source.LogLine) (source.LogLine, bool) {
-	ok := true
+	var ok bool
 	for _, s := range p.stages {
 		line, ok = s(line)
 		if !ok {
