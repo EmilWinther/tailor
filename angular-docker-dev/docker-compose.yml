@@ -1,0 +1,21 @@
+services:
+  angular:
+    build: .
+    ports:
+      - "4200:4200"
+    volumes:
+      # Mount the project source so edits on the host trigger a rebuild
+      # inside the container (live reload / HMR).
+      - .:/app
+      # Anonymous volume that shadows the bind mount for node_modules:
+      # keeps the container's Linux-built dependencies instead of the
+      # host's (which may be for a different OS/arch), and avoids the
+      # host needing node_modules at all.
+      - /app/node_modules
+    environment:
+      # Belt-and-braces for file watching across the bind mount.
+      - CHOKIDAR_USEPOLLING=true
+    # Keep stdin/tty so `docker compose attach` gives you the Angular
+    # CLI's interactive output.
+    stdin_open: true
+    tty: true
