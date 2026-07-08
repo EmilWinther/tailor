@@ -23,4 +23,7 @@ EXPOSE 4200
 # --host 0.0.0.0 so the server is reachable from outside the container.
 # --poll 2000 because inotify events don't cross the bind-mount boundary
 # on macOS/Windows; polling makes live reload work everywhere.
-CMD ["npx", "ng", "serve", "--host", "0.0.0.0", "--port", "4200", "--poll", "2000"]
+# node runs the CLI script directly (instead of executing the
+# node_modules/.bin/ng shim) so missing exec bits or a noexec mount on
+# the node_modules volume can't cause "ng: Permission denied".
+CMD ["node", "node_modules/@angular/cli/bin/ng.js", "serve", "--host", "0.0.0.0", "--port", "4200", "--poll", "2000"]
