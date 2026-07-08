@@ -1,8 +1,13 @@
 # Development image for an Angular 21 project.
 # Angular 21 requires Node.js ^20.19, ^22.12 or >=24 — node:22 (LTS) covers it.
-FROM node:22-alpine
+# Debian-based (not alpine): the npm bundled with node:22-alpine crashes with
+# "Exit handler never called!" during npm ci.
+FROM node:22-slim
 
 WORKDIR /app
+
+# The bundled npm 10.9.x is the crashy one — upgrade it first.
+RUN npm install -g npm@11
 
 # Install dependencies in their own layer so they are only re-installed
 # when package.json / package-lock.json actually change.

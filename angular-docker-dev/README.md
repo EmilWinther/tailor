@@ -8,7 +8,7 @@ reload, plus an IntelliJ run configuration for debugging at
 
 | File | Purpose |
 |------|---------|
-| `Dockerfile` | Dev image: Node 22 (LTS), `npm ci`, runs `ng serve` |
+| `Dockerfile` | Dev image: Node 22 (LTS, Debian-based), `npm ci`, runs `ng serve` |
 | `docker-compose.yml` | Binds your source into the container, maps port 4200 |
 | `.dockerignore` | Keeps `node_modules`, `dist`, `.angular` etc. out of the build context |
 | `.run/Debug Angular (localhost 4200).run.xml` | Ready-made IntelliJ "JavaScript Debug" run configuration |
@@ -95,7 +95,14 @@ docker compose down
 
 ## Notes
 
-- The image uses `node:22-alpine`; Angular 21 requires Node `^20.19`,
-  `^22.12` or `>=24`, so Node 22 LTS is a safe default.
+- The image uses `node:22-slim` (Debian-based); Angular 21 requires Node
+  `^20.19`, `^22.12` or `>=24`, so Node 22 LTS is a safe default. Alpine
+  is deliberately avoided: its bundled npm 10.9.x crashes with
+  `Exit handler never called!` during `npm ci`. npm is upgraded to v11 in
+  the image for the same reason.
+- If your machine sits behind a corporate proxy or custom CA, the build
+  container needs it too — pass `HTTP_PROXY`/`HTTPS_PROXY` as build args
+  or configure them in your Docker/Podman engine config, otherwise
+  `npm ci` will fail with network-ish errors.
 - Port 4200 carries both HTTP and the Vite HMR websocket, so no extra
   ports are needed for live reload.
