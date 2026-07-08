@@ -8,7 +8,7 @@ reload, plus an IntelliJ run configuration for debugging at
 
 | File | Purpose |
 |------|---------|
-| `Dockerfile` | Dev image: Node 22 (LTS, Debian-based), `npm ci`, runs `ng serve` |
+| `Dockerfile` | Dev image: Node 20.19 (alpine), `npm ci`, runs `ng serve` |
 | `docker-compose.yml` | Binds your source into the container, maps port 4200 |
 | `.dockerignore` | Keeps `node_modules`, `dist`, `.angular` etc. out of the build context |
 | `.run/Debug Angular (localhost 4200).run.xml` | Ready-made IntelliJ "JavaScript Debug" run configuration |
@@ -95,11 +95,18 @@ docker compose down
 
 ## Notes
 
-- The image uses `node:22-slim` (Debian-based); Angular 21 requires Node
-  `^20.19`, `^22.12` or `>=24`, so Node 22 LTS is a safe default. Alpine
-  is deliberately avoided: its bundled npm 10.9.x crashes with
-  `Exit handler never called!` during `npm ci`. npm is upgraded to v11 in
-  the image for the same reason.
+- The image uses `node:20.19.1-alpine`; Angular 21 requires Node
+  `^20.19`, `^22.12` or `>=24`. `node:22-alpine` is deliberately avoided:
+  its bundled npm 10.9.x crashes with `Exit handler never called!` during
+  `npm ci`.
+- **`sh: ng: Permission denied` (or mysteriously stale dependencies)**
+  after changing the base image or `package.json`: Compose preserves the
+  anonymous `node_modules` volume across container recreations, so the
+  container may still be using `node_modules` from an old build. Run
+  `docker compose down -v` and then `up --build` to get a fresh volume.
+- On SELinux hosts (RHEL/Fedora, common with Podman), bind mounts may
+  need the `:z` label option (`.:/app:z`) to avoid permission-denied
+  errors on source files.
 - If your machine sits behind a corporate proxy or custom CA, the build
   container needs it too — pass `HTTP_PROXY`/`HTTPS_PROXY` as build args
   or configure them in your Docker/Podman engine config, otherwise
