@@ -1,21 +1,20 @@
+version: "2"
+
+# errcheck, govet, ineffassign, staticcheck (incl. gosimple), and unused
+# are enabled by default in v2.
 linters:
   enable:
-    - gofmt
-    - govet
-    - errcheck
-    - staticcheck
-    - gosimple
-    - ineffassign
-    - unused
     - misspell
     - godot
+  settings:
+    godot:
+      scope: declarations
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
 
-linters-settings:
-  godot:
-    scope: declarations
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
+formatters:
+  enable:
+    - gofmt

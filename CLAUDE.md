@@ -9,46 +9,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 go test ./...
 
 # Run tests for a single package
-go test ./internal/pipeline/...
+go test ./internal/parse/...
 
 # Run a single test by name
-go test ./internal/source/... -run TestParseTimestamp_Syslog
+go test ./internal/api/... -run TestIngest_NDJSONBody
 
-# Build the binary (cmd/tailor/main.go is the entry point, not yet in the repo)
-go build -o tailor ./cmd/tailor
+# Build the binary
+go build -o bin/api ./cmd/api
 
-# Verbose test output
-go test -v ./...
+# Lint (also run in CI) and format
+golangci-lint run ./...
+gofmt -w -s $(go list -f '{{.Dir}}' ./...)
+
+# Local OpenSearch for end-to-end testing (http://localhost:9200, no auth)
+docker compose up -d --wait
 ```
 
-No linter or Makefile is configured. The module is `github.com/yourname/tailor` (Go 1.22) with zero external dependencies.
+The module is `github.com/emilwinther/tailor` (Go 1.24). Single external dependency: `opensearch-project/opensearch-go/v4`.
 
 ## Architecture
 
+An HTTP API that ingests data files (NDJSON, JSON array/object, CSV) into OpenSearch via batched `_bulk` requests.
+
 ```
-Sources ──► Merger ──► Pipeline ──► Renderer
+POST /ingest/{index} ──► parse.Iterator ──► osclient.BulkIndex ──► OpenSearch _bulk
 ```
 
-Each layer communicates via `chan source.LogLine`. Sources own nothing after sending; the caller owns the channel. The `LogLine` struct (`internal/source/source.go`) is the common currency: `Source` (label), `Time` (parsed or arrival), `Text` (raw line, no trailing newline).
+**`internal/parse/`** — Format detection and streaming parsers. `Detect(explicit, filename, contentType)` resolves the format (query param → extension → Content-Type → NDJSON default). `New(r, format)` returns an `Iterator` whose `Next()` yields one `map[string]any` per document and `io.EOF` at the end. Malformed input surfaces as `*parse.Error` carrying a line/record number — the API layer relies on this type (via `errors.As`) to distinguish client errors (400) from OpenSearch failures (502). CSV values stay strings; OpenSearch coerces types.
 
-**`internal/source/`** — Two concrete source types plus shared helpers.
-- `FileSource`: polling-based tail (no inotify), handles truncation and rotation via `checkRotation` comparing inode and file position. Uses a `bufio.Reader`; after truncation the fd is seeked to 0 and the reader's buffer is implicitly drained, so the next read picks up new content.
-- `DockerSource`: shells out to `docker logs -f --timestamps`, then strips the RFC3339Nano prefix Docker adds via `splitTimestamp`.
-- `ParseTimestamp`: tries RFC3339/Nano → `YYYY-MM-DD HH:MM:SS` → syslog (`Jun  9 14:03:02`) in order. Syslog has no year, so it injects the current year via `AddDate`.
+**`internal/osclient/`** — `Client` wraps `opensearchapi.Client`. `BulkIndex` drains a `DocIterator` (satisfied by `parse.Iterator`) into `_bulk` bodies, flushing every 500 docs or 5 MB. It returns a `BulkResult{Indexed, Failed, Errors}` that is meaningful even when the returned error is non-nil: buffered docs are flushed before an iterator error propagates, so partial progress is reported. Per-item rejections (e.g. mapping conflicts) are counted as `Failed` with up to 5 reasons captured — they are not a Go error.
 
-**`internal/merge/`** — `Merger` buffers lines in a min-heap for a configurable `Window` (default 200ms) before emitting them in timestamp order. A flush ticker drains lines older than `now - window`; when the input channel closes the entire heap is drained immediately. Use a large `Window`/`Flush` in tests to make the ticker irrelevant and exercise only the drain-on-close path.
+**`internal/api/`** — `NewServer(Ingester)` builds the mux using Go 1.22+ path patterns (`POST /ingest/{index}`). The `Ingester` interface decouples handlers from `osclient` so tests use a fake. `requestFile` accepts either a multipart `file` field or the raw request body. Status mapping: all indexed → 200, partial bulk rejections → 207, `*parse.Error`/bad request → 400, transport error → 502.
 
-**`internal/pipeline/`** — Ordered list of `Stage` functions (filter → exclude → highlight). Each stage returns `(LogLine, bool)`; `false` short-circuits the rest. Highlight wraps regex matches in `\x1b[1;33;7m...\x1b[0m` (bold yellow inverse). No-op when `color=false` (no stage is added at all).
+**`cmd/api/`** — Flag/env config (`LISTEN_ADDR`, `OPENSEARCH_URL`, optional `OPENSEARCH_USERNAME`/`PASSWORD`; flags override env), graceful shutdown on SIGINT/SIGTERM.
 
-**`internal/render/`** — `ANSI` assigns a stable color (6-color palette, cycled by source name) and dynamically widens the source label column as new, longer labels are seen. Respects the `NO_COLOR` env var. Thread-safe via mutex.
+## Testing conventions
 
-## Adding a new source
-
-Implement the `Source` interface in `internal/source/source.go`:
-```go
-type Source interface {
-    Name() string
-    Run(ctx context.Context, out chan<- LogLine) error
-}
-```
-`Run` must not close `out` and must return when `ctx` is cancelled. See `file.go` or `docker.go` for reference.
+No test needs a real OpenSearch. `osclient` tests spin up an `httptest.Server` that parses `_bulk` bodies (see `fakeOpenSearch` in `client_test.go`); `api` tests inject a `fakeIngester`. For end-to-end verification use the compose file and the curl examples in the README.

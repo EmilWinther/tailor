@@ -1,0 +1,35 @@
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    container_name: opensearch
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true # local dev only: plain http, no auth
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # Optional UI at http://localhost:5601 — start with:
+  #   docker compose --profile dashboards up -d
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.1
+    container_name: opensearch-dashboards
+    profiles: ["dashboards"]
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "5601:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+volumes:
+  opensearch-data:
