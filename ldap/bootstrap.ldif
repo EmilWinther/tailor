@@ -1,0 +1,36 @@
+# Seed data loaded into OpenLDAP on first boot (base DN dc=example,dc=org
+# is created by the image from LDAP_DOMAIN=example.org).
+#
+# Users:  alice/alicepassword, bob/bobpassword
+# Group:  ingest-admins (mapped to the all_access OpenSearch role in
+#         ldap/opensearch-security/roles_mapping.yml)
+
+dn: ou=people,dc=example,dc=org
+objectClass: organizationalUnit
+ou: people
+
+dn: uid=alice,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: Alice Example
+sn: Example
+uid: alice
+mail: alice@example.org
+userPassword: alicepassword
+
+dn: uid=bob,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+cn: Bob Example
+sn: Example
+uid: bob
+mail: bob@example.org
+userPassword: bobpassword
+
+dn: ou=groups,dc=example,dc=org
+objectClass: organizationalUnit
+ou: groups
+
+dn: cn=ingest-admins,ou=groups,dc=example,dc=org
+objectClass: groupOfNames
+cn: ingest-admins
+member: uid=alice,ou=people,dc=example,dc=org
+member: uid=bob,ou=people,dc=example,dc=org

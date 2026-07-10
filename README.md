@@ -86,6 +86,44 @@ Documents are streamed to OpenSearch's `_bulk` API in batches of 500 docs / 5 MB
 
 Flags override env vars. Credentials are only needed against a secured cluster; the bundled compose file disables the security plugin for local development.
 
+## LDAP authentication (local)
+
+`compose.ldap.yml` runs a secured variant of the stack: a real OpenLDAP server plus OpenSearch with the security plugin **enabled** and configured to authenticate users against it. The default `docker-compose.yml` stays auth-free; don't run both at once (they share ports 9200/5601).
+
+```bash
+docker compose -f compose.ldap.yml up -d --wait
+```
+
+Seeded LDAP users (see `ldap/bootstrap.ldif`): `alice`/`alicepassword` and `bob`/`bobpassword`, both members of the `ingest-admins` group, which is mapped to OpenSearch's `all_access` role. The internal `admin` user (`LocalDev!Pass123`) also still works.
+
+```bash
+# LDAP user authenticates; the group comes back as a backend role
+curl -u alice:alicepassword http://localhost:9200/_plugins/_security/authinfo
+# → "user_name":"alice", "backend_roles":["ingest-admins"], ...
+
+curl -su alice:wrongpassword -o /dev/null -w '%{http_code}\n' http://localhost:9200   # 401
+
+# The ingest API just needs the credentials — no code changes
+OPENSEARCH_USERNAME=alice OPENSEARCH_PASSWORD=alicepassword go run ./cmd/api
+curl -XPOST --data-binary @examples/users.ndjson \
+  -H 'Content-Type: application/x-ndjson' localhost:8080/ingest/users
+```
+
+With the dashboards profile (`docker compose -f compose.ldap.yml --profile dashboards up -d`) you get a login page at http://localhost:5601 — sign in as `alice` to see LDAP auth end to end.
+
+How it fits together:
+
+- `ldap/bootstrap.ldif` — seed users under `ou=people` and the `ingest-admins` group under `ou=groups` (base DN `dc=example,dc=org`).
+- `ldap/opensearch-security/config.yml` — the security plugin's auth chain: internal users first (keeps `admin` working), then LDAP (bind + `(uid={0})` user search), plus an authz section that resolves group memberships (`(member={0})`) into backend roles.
+- `ldap/opensearch-security/roles_mapping.yml` — maps the `ingest-admins` backend role to `all_access`.
+
+Two things to know:
+
+- The security YAMLs are loaded into OpenSearch's security index on the **first boot of a fresh data volume only**. After changing them, reset with `docker compose -f compose.ldap.yml down -v`.
+- This setup is local-dev-only: the REST layer runs plain HTTP and the LDAP bind is unencrypted. A real deployment needs TLS on both legs.
+
+To poke at the directory itself: `ldapsearch -x -H ldap://localhost:389 -D cn=admin,dc=example,dc=org -w adminpassword -b dc=example,dc=org`.
+
 ## Development
 
 ```bash

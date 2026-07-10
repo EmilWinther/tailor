@@ -1,0 +1,70 @@
+# OpenSearch security config: authenticate via internal users first (so the
+# demo `admin` user keeps working for healthchecks and dashboards), then fall
+# through to LDAP. Group membership in LDAP becomes backend roles, which
+# roles_mapping.yml maps onto OpenSearch roles.
+#
+# Loaded into the security index on the FIRST boot of a fresh data volume.
+# After editing, reset with: docker compose -f compose.ldap.yml down -v
+_meta:
+  type: "config"
+  config_version: 2
+
+config:
+  dynamic:
+    authc:
+      basic_internal_auth_domain:
+        description: "Internal users (admin, kibanaserver) via HTTP basic auth"
+        http_enabled: true
+        transport_enabled: true
+        order: 0
+        http_authenticator:
+          type: basic
+          challenge: false
+        authentication_backend:
+          type: internal
+      ldap_auth_domain:
+        description: "LDAP users via HTTP basic auth"
+        http_enabled: true
+        transport_enabled: true
+        order: 1
+        http_authenticator:
+          type: basic
+          challenge: true
+        authentication_backend:
+          type: ldap
+          config:
+            enable_ssl: false
+            enable_start_tls: false
+            enable_ssl_client_auth: false
+            verify_hostnames: false
+            hosts:
+              - ldap:389
+            bind_dn: cn=admin,dc=example,dc=org
+            password: adminpassword
+            userbase: ou=people,dc=example,dc=org
+            usersearch: "(uid={0})"
+            username_attribute: uid
+    authz:
+      ldap_role_backend:
+        description: "Resolve LDAP group memberships to backend roles"
+        http_enabled: true
+        transport_enabled: true
+        authorization_backend:
+          type: ldap
+          config:
+            enable_ssl: false
+            enable_start_tls: false
+            enable_ssl_client_auth: false
+            verify_hostnames: false
+            hosts:
+              - ldap:389
+            bind_dn: cn=admin,dc=example,dc=org
+            password: adminpassword
+            userbase: ou=people,dc=example,dc=org
+            usersearch: "(uid={0})"
+            username_attribute: uid
+            rolebase: ou=groups,dc=example,dc=org
+            rolesearch: "(member={0})"
+            rolename: cn
+            userrolename: disabled
+            resolve_nested_roles: false

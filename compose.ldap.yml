@@ -1,0 +1,84 @@
+# Secured local stack: OpenSearch with the security plugin enabled,
+# authenticating users against a real OpenLDAP server.
+#
+#   docker compose -f compose.ldap.yml up -d --wait
+#
+# Don't run this and the default docker-compose.yml at the same time — both
+# bind ports 9200/5601. See "LDAP authentication (local)" in the README.
+#
+# LOCAL DEV ONLY: the REST layer stays on plain http and LDAP uses an
+# unencrypted simple bind. A real deployment needs TLS on both.
+
+services:
+  ldap:
+    image: osixia/openldap:1.5.0
+    container_name: ldap
+    command: ["--copy-service"]
+    environment:
+      - LDAP_ORGANISATION=Example Org
+      - LDAP_DOMAIN=example.org # base DN: dc=example,dc=org
+      - LDAP_ADMIN_PASSWORD=adminpassword
+    ports:
+      - "389:389" # handy for ldapsearch from the host
+    volumes:
+      - ./ldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "ldapsearch -x -H ldap://localhost -D cn=admin,dc=example,dc=org -w adminpassword -b dc=example,dc=org -s base >/dev/null || exit 1",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    container_name: opensearch-ldap
+    depends_on:
+      ldap:
+        condition: service_healthy
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=LocalDev!Pass123
+      # Keep the REST API on plain http so the ingest API can still use
+      # http://localhost:9200 — authn/authz stay fully enabled.
+      - plugins.security.ssl.http.enabled=false
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch-ldap-data:/usr/share/opensearch/data
+      # Loaded into the security index on first boot of a fresh volume; after
+      # edits: docker compose -f compose.ldap.yml down -v
+      - ./ldap/opensearch-security/config.yml:/usr/share/opensearch/config/opensearch-security/config.yml:ro
+      - ./ldap/opensearch-security/roles_mapping.yml:/usr/share/opensearch/config/opensearch-security/roles_mapping.yml:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fs -u 'admin:LocalDev!Pass123' http://localhost:9200/_cluster/health || exit 1",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  # Optional UI at http://localhost:5601 — log in as alice/alicepassword to
+  # see LDAP auth in action. Start with:
+  #   docker compose -f compose.ldap.yml --profile dashboards up -d
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.1
+    container_name: opensearch-dashboards-ldap
+    profiles: ["dashboards"]
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - OPENSEARCH_USERNAME=kibanaserver # demo internal service user
+      - OPENSEARCH_PASSWORD=kibanaserver
+    ports:
+      - "5601:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+volumes:
+  opensearch-ldap-data:

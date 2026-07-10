@@ -23,6 +23,9 @@ gofmt -w -s $(go list -f '{{.Dir}}' ./...)
 
 # Local OpenSearch for end-to-end testing (http://localhost:9200, no auth)
 docker compose up -d --wait
+
+# Secured variant: OpenSearch + OpenLDAP, LDAP-backed auth (see README)
+docker compose -f compose.ldap.yml up -d --wait
 ```
 
 The module is `github.com/emilwinther/tailor` (Go 1.24). Single external dependency: `opensearch-project/opensearch-go/v4`.

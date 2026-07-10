@@ -1,0 +1,40 @@
+# Role mappings: mounting this file REPLACES the defaults, so the stock demo
+# mappings are reproduced here with one addition — the LDAP group
+# `ingest-admins` (a backend role via the authz config) gets all_access.
+_meta:
+  type: "rolesmapping"
+  config_version: 2
+
+all_access:
+  reserved: false
+  backend_roles:
+    - "admin"
+    - "ingest-admins"
+  description: "Admins: internal admin user and the LDAP ingest-admins group"
+
+own_index:
+  reserved: false
+  users:
+    - "*"
+  description: "Allow full access to an index named like the username"
+
+kibana_user:
+  reserved: false
+  backend_roles:
+    - "kibanauser"
+  description: "Maps kibanauser to kibana_user"
+
+readall:
+  reserved: false
+  backend_roles:
+    - "readall"
+
+manage_snapshots:
+  reserved: false
+  backend_roles:
+    - "snapshotrestore"
+
+kibana_server:
+  reserved: true
+  users:
+    - "kibanaserver"
