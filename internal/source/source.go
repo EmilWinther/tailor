@@ -35,6 +35,8 @@ var tsPatterns = []struct {
 }{
 	// RFC3339 / RFC3339Nano: 2026-06-09T14:03:02.123456789Z
 	{regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))`), time.RFC3339Nano},
+	// journalctl -o short-iso: 2026-06-09T14:03:02+0200 (no colon in offset)
+	{regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?[+-]\d{4})`), "2006-01-02T15:04:05.999999999Z0700"},
 	// Common app format: 2026-06-09 14:03:02
 	{regexp.MustCompile(`^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})`), "2006-01-02 15:04:05"},
 	// Syslog-ish: Jun  9 14:03:02
