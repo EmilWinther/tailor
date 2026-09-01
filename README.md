@@ -27,6 +27,9 @@ tailor ssh://web-01/var/log/app.log
 
 # One service across the whole fleet, in timestamp order
 tailor journald://deploy@web-01,web-02,web-03/api.service --filter ERROR
+
+# The same container on every host it runs on
+tailor docker://web-01,web-02/api
 ```
 
 ## Install
@@ -72,12 +75,15 @@ Each source runs in its own goroutine and pushes `LogLine`s into a bounded chann
 
 ## Remote sources
 
-Two source syntaxes reach other machines, both by shelling out to your system `ssh`:
+Three source syntaxes reach other machines, all by shelling out to your system `ssh`:
 
 ```bash
 tailor ssh://HOST/ABSOLUTE/PATH        # tail -F a file over there
 tailor journald://HOST/UNIT            # journalctl -f -u UNIT over there
+tailor docker://HOST/CONTAINER         # docker logs -f a container over there
 ```
+
+`docker://api` (no host) still means the container on your local daemon; the host only appears when there is a slash after it.
 
 `HOST` is anything ssh takes — `web-01`, `deploy@web-01`, or an alias from your `~/.ssh/config` — so keys, jump hosts, and ports configured there work without telling tailor about them. Nothing is installed on the remote side; it needs `tail` or `journalctl` and nothing else.
 
@@ -85,13 +91,16 @@ Since one service usually lives on more than one box, the host part accepts a co
 
 ```bash
 tailor journald://deploy@web-01,web-02,web-03/api.service
+tailor docker://web-01,web-02,web-03/api
 ```
 
 That expands to one source per host, each labelled and coloured separately, all merged into a single timestamp-ordered stream. Mixing transports in one invocation is fine:
 
 ```bash
-tailor ./local.log docker://api ssh://web-01/var/log/app.log journald://db-01/postgresql
+tailor ./local.log docker://api docker://web-01/api ssh://web-02/var/log/app.log journald://db-01/postgresql
 ```
+
+`DOCKER_HOST=ssh://web-01` also works and always has, but it redirects *every* docker source in the invocation to that one daemon. `docker://HOST/CONTAINER` is per-source, which is what you want for the same container across a fleet, or a remote container next to a local one.
 
 Connections use `BatchMode=yes`, so a host that would prompt for a password fails instead of hanging, and keepalives turn a dead link into a clean exit. A failure on the *first* connection is reported and tailor gives up on that source — that's your typo or your missing key. After that, drops are treated as normal and reconnect with backoff, resuming at the end of the file, so a rebooting box rejoins the stream on its own.
 
@@ -105,7 +114,7 @@ Timestamps come from the start of each line (RFC3339, journalctl's `short-iso`, 
 
 Stuff I'd like to add, roughly in order of how much I want it:
 
-- [x] `ssh://HOST/PATH` and `journald://HOST/UNIT` sources
+- [x] `ssh://HOST/PATH`, `journald://HOST/UNIT`, and `docker://HOST/CONTAINER` sources
 - [ ] `journald://UNIT` for the local machine (today journald means remote)
 - [ ] `k8s://namespace/pod` source (or pod label selectors)
 - [ ] An interactive TUI — scrollback, pause, editing the filter live — probably with Bubble Tea

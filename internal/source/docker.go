@@ -59,6 +59,12 @@ func (d *DockerSource) Run(ctx context.Context, out chan<- LogLine) error {
 
 // splitTimestamp separates the RFC3339Nano prefix that --timestamps adds.
 func (d *DockerSource) splitTimestamp(line string) (time.Time, string) {
+	return splitDockerTimestamp(line)
+}
+
+// splitDockerTimestamp separates the RFC3339Nano prefix that --timestamps
+// adds. It is shared with SSHSource, which runs the same command remotely.
+func splitDockerTimestamp(line string) (time.Time, string) {
 	now := time.Now()
 	sp := strings.IndexByte(line, ' ')
 	if sp <= 0 {

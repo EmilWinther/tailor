@@ -85,9 +85,11 @@ func TestSSHSource_BuildArgs(t *testing.T) {
 
 func TestSSHSource_Run_RejectsBadConfig(t *testing.T) {
 	cases := map[string]*SSHSource{
-		"no host":   {Path: "/var/log/app.log"},
-		"no target": {Host: "web-01"},
-		"both":      {Host: "web-01", Path: "/var/log/app.log", Unit: "nginx"},
+		"no host":            {Path: "/var/log/app.log"},
+		"no target":          {Host: "web-01"},
+		"path and unit":      {Host: "web-01", Path: "/var/log/app.log", Unit: "nginx"},
+		"path and container": {Host: "web-01", Path: "/var/log/app.log", Container: "api"},
+		"unit and container": {Host: "web-01", Unit: "nginx", Container: "api"},
 	}
 	for name, s := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -333,5 +335,155 @@ func TestSSHSource_Run_ThroughFakeTransport(t *testing.T) {
 			t.Fatal("timed out waiting for a tailed line")
 		case <-time.After(100 * time.Millisecond):
 		}
+	}
+}
+
+func TestSSHSource_Name_Container(t *testing.T) {
+	s := &SSHSource{Host: "web-01", Container: "api"}
+	if got, want := s.Name(), "docker://web-01/api"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestSSHSource_RemoteCommand_Container(t *testing.T) {
+	s := &SSHSource{Host: "web-01", Container: "api"}
+	if got, want := s.remoteCommand(false), "docker logs -f --timestamps --tail 0 'api'"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got, want := s.remoteCommand(true), "docker logs -f --timestamps --tail all 'api'"; got != want {
+		t.Errorf("fromStart: got %q, want %q", got, want)
+	}
+
+	s.Since = "10m"
+	if got, want := s.remoteCommand(false), "docker logs -f --timestamps --since '10m' 'api'"; got != want {
+		t.Errorf("since: got %q, want %q", got, want)
+	}
+}
+
+func TestSSHSource_ParseLine(t *testing.T) {
+	// Docker's --timestamps prefix is ours, so it is stripped.
+	container := &SSHSource{Host: "web-01", Container: "api"}
+	ts, text := container.parseLine("2026-06-09T14:03:02.123456789Z GET /health 200")
+	if want := time.Date(2026, 6, 9, 14, 3, 2, 123_456_789, time.UTC); !ts.Equal(want) {
+		t.Errorf("time: got %v, want %v", ts, want)
+	}
+	if text != "GET /health 200" {
+		t.Errorf("text: got %q, want the prefix stripped", text)
+	}
+
+	// A file's own timestamp belongs to the log, so it stays.
+	file := &SSHSource{Host: "web-01", Path: "/var/log/app.log"}
+	ts, text = file.parseLine("2026-06-09 14:03:02 GET /health 200")
+	if want := time.Date(2026, 6, 9, 14, 3, 2, 0, time.UTC); !ts.Equal(want) {
+		t.Errorf("time: got %v, want %v", ts, want)
+	}
+	if text != "2026-06-09 14:03:02 GET /health 200" {
+		t.Errorf("text: got %q, want the line unchanged", text)
+	}
+}
+
+func TestParseSSHSpec_DockerFleet(t *testing.T) {
+	got, err := ParseSSHSpec("docker://deploy@web-01,web-02/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d sources, want 2", len(got))
+	}
+	for i, want := range []string{"deploy@web-01", "deploy@web-02"} {
+		if got[i].Host != want {
+			t.Errorf("host %d: got %q, want %q", i, got[i].Host, want)
+		}
+		if got[i].Container != "api" || got[i].Path != "" || got[i].Unit != "" {
+			t.Errorf("source %d: got %+v", i, got[i])
+		}
+	}
+	if got[0].Name() != "docker://deploy@web-01/api" {
+		t.Errorf("name: got %q", got[0].Name())
+	}
+}
+
+func TestParseSSHSpec_RejectsSlashInNonPathTargets(t *testing.T) {
+	for _, spec := range []string{"docker://web-01/api/extra", "journald://web-01/nginx/extra"} {
+		if _, err := ParseSSHSpec(spec); err == nil {
+			t.Errorf("%q: expected an error", spec)
+		}
+	}
+	// Paths, on the other hand, are full of slashes.
+	if _, err := ParseSSHSpec("ssh://web-01/var/log/nginx/access.log"); err != nil {
+		t.Errorf("nested path: %v", err)
+	}
+}
+
+func TestIsRemote(t *testing.T) {
+	remote := []string{
+		"ssh://web-01/var/log/app.log",
+		"journald://web-01/nginx",
+		"docker://web-01/api",
+	}
+	local := []string{
+		"docker://api", // the local daemon, not a host called "api"
+		"app.log",
+		"./nginx/access.log",
+		"/var/log/syslog",
+	}
+	for _, spec := range remote {
+		if !IsRemote(spec) {
+			t.Errorf("%q: want remote", spec)
+		}
+	}
+	for _, spec := range local {
+		if IsRemote(spec) {
+			t.Errorf("%q: want local", spec)
+		}
+	}
+}
+
+// TestSSHSource_Run_RemoteDockerThroughFakeTransport runs the generated
+// docker command for real: the fake ssh puts a fake docker on PATH and runs
+// the command through sh, so the flags, the quoting, and the stripping of
+// docker's timestamp prefix are all exercised end to end.
+func TestSSHSource_Run_RemoteDockerThroughFakeTransport(t *testing.T) {
+	dir := t.TempDir()
+	docker := filepath.Join(dir, "docker")
+	script := "#!/bin/sh\n" +
+		// Fail loudly if we were not asked to follow with timestamps.
+		`case "$*" in *"-f --timestamps"*) ;; *) echo "unexpected args: $*" >&2; exit 2;; esac` + "\n" +
+		`echo "2026-06-09T14:03:02.000000001Z hello from $*"` + "\n"
+	if err := os.WriteFile(docker, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &SSHSource{
+		Host:      "web-01",
+		Container: "api",
+		Retry:     time.Millisecond,
+		bin: fakeSSH(t, `PATH="`+dir+`:$PATH"; export PATH`+"\n"+
+			`for a in "$@"; do cmd="$a"; done`+"\n"+
+			`exec sh -c "$cmd"`),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := make(chan LogLine, 4)
+	go func() { _ = s.Run(ctx, out) }()
+
+	select {
+	case line := <-out:
+		if line.Source != "docker://web-01/api" {
+			t.Errorf("source: got %q", line.Source)
+		}
+		if !strings.HasPrefix(line.Text, "hello from ") {
+			t.Fatalf("text: got %q, want docker's timestamp prefix stripped", line.Text)
+		}
+		if !strings.HasSuffix(line.Text, "api") {
+			t.Errorf("container name should reach docker, got %q", line.Text)
+		}
+		want := time.Date(2026, 6, 9, 14, 3, 2, 1, time.UTC)
+		if !line.Time.Equal(want) {
+			t.Errorf("time: got %v, want %v", line.Time, want)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for a line")
 	}
 }
